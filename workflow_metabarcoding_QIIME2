@@ -1,0 +1,197 @@
+Para comenzar con el procesamiento de datos, el primer paso es hacer un archivo 
+que contenta las direcciones absolutas de nuestras secuencias forward, reverse y un ID.
+Puede usarse el editor de texto que sea. 
+
+Por ejemplo:
+
+|ID	| absolute-forward-path	| absolute-reverse-path
+|N86R1	| /home/user/project/raw/seqs/seq1_R1.fastq.gz	| /home/user/project/raw/seqs/seq1_R2.fastq.gz
+|N86R2	| /home/user/project/raw/seqs/seq2_R1.fastq.gz	| /home/user/project/raw/seqs/seq2_R2.fastq.gz
+
+..... hasta completar todas las secuencias.
+Una vez organizado el archivo (normalmente llamado archivo manifiesto) se procede a 
+exportarse para que qiime2 lo reconozca. 
+### Agregar información sobre la versión de QIIME2 utilizada
+Para usar los comandos de qiime2 es necesario activar el ambiente
+
+~~~
+$ conda activate qiime2
+~~~
+{: .bash}
+
+Es importante decir que los archivos de manifiesto deben ser uno para los datos de 16s rRNA y otro para 
+los datos de ITS.
+Después se usa el siguiente comando para importar el archivo manifiesto de nuestros datos de 
+secuenciación pareados:
+
+~~~
+$ qiime tools import --type 'SampleData[PairedEndSequencesWithQuality]' \
+--input-path pe-manifest.txt \
+--output-path paired-end-demux.qza \
+--input-format PairedEndFastqManifestPhred33V2
+~~~
+{: .bash}
+
+Como output tendremos el archivo "paired-end-demux.qza". El cual usaremos para el 
+siguiente comando con DADA2.
+
+# Agregar descripción de DADA2
+
+Para los datos de 16S rRNA y de ITS se utilizó el algoritmo de clustering DADA2. Los parámetros utilizados
+para uno u otro cambian y se describen más a detalle a continuación. Los archivos de salida de ambos análisis 
+de clustering pueden ser procesados de manera paralela pues no necesita haber cambio de parámetros.
+
+|´denoise-paired´| Denoise and dereplicate paired-end sequences.|
+|´--p-trunc-len´| Position at which read sequences should truncated due to decrease in quality. This can truncate
+3' or 5' end of the input sequences.|
+|´--p-trim-left´| Position at which read sequences shoul de trimmed due to low quality.|
+|´--p-max-ee´| Reads with number of expected errors higher than this value will be discarded.|
+|´--p-n-threads´| The number of threads to use for multithreaded processing.|
+
+## Código para procesar 16S rRNA
+
+~~~
+$ qiime dada2 denoise-paired --i-demultiplexed-seqs demux.qza \
+--p-trim-left-f 11 --p-trim-left-r 11 \
+--p-trunc-len-f 260 --p-trunc-len-r 195 --p-m-threads 8 \
+--p-max-ee-f 8 --p-max-ee-r 8 --o-table table.qza \
+--o-representative-sequences rep-seqs.qza --o-denoising-stats denoising-stats.qza --verbose
+~~~
+{: .bash}
+
+## Código para procesar ITS
+
+~~~
+$ qiime dada2 denoise-paired --i-demultiplexed-seqs its-demux.qza \
+--p-trim-left-f 8 --p-trim-left-r 8 \
+--p-trunc-len-f 280 --p-trunc-len-r 220 --p-m-threads 8 \
+--p-max-ee-f 5 --p-max-ee-r 5 --o-table table.qza \
+--o-representative-sequences rep-seqs.qza --o-denoising-stats denoising-stats.qza --verbose
+~~~
+{: .bash}
+
+### Para pedir ayuda en cualquiera de los parámetros o ver la lista completa de parámetros
+sólo se necesita teclear 'qiime dada2 denoise-paired --help' y se desplegará un menú. Todos aquellos parámetros 
+omitidos serán usados con valores default del algoritmo.
+
+Se generarán 3 archivos output con formato '.qza', hay que convertirlos a '.qzv'
+para poder visualizarlos en línea (qiime view), usa los siguientes comandos:
+
+~~~
+$ qiime feature-table summarize --i-table table.qza \
+--o-visualization table.qzv
+~~~
+{: .bash}
+
+~~~
+$ qiime feature-table tabulate-seqs \
+--i-data rep-seqs.qza --o-visualization rep-seqs.qzv
+~~~
+{: .bash}
+
+~~~
+$ qiime metadata tabulate --m-input-file denoising-stats.qza --o-visualization denoising-stats.qzv
+~~~
+{: .bash}
+
+Al terminar de correr estos tres comandos anteriores, obtendremos los siguientes archivos. 
+~~~
+`denoising-stats.qzv`
+`rep-seqs.qzv`
+`table.qzv`
+~~~
+{: .output}
+
+Ahora hay que importar los archivos '.qzv' al local con el protocolo SCP.
+Visualiza los archivos en la plataforma online de Qiime2 (QIIME2 View).
+
+En este caso, si el archivo ´rep-seqs.qzv´ cumple con la longitud de los ASVs 
+deseada y el archivo ´denoising.stats.qzv´ cumple en cada una de sus columnas 
+con valores aceptables por el usuario, sobre todo en el apartado de counts finales, ya
+pueden exportarse los archivos para un posterior análisis en QIIME2.
+
+~~~
+$ qiime tools export --input-path table.qza --output-path exported-f
+eature-table
+~~~
+{: .bash}
+
+~~~
+`/exported-feature-table`
+~~~
+{: .output}
+
+Se obtendrá una carpeta con un archivo de formato `.biom` el cual puede usarse para
+el posterior análisis o se puede convertir en otros formatos. En este caso en particular, lo 
+convertí a formato `.tsv`
+
+~~~
+biom convert -i exported/feature-table.biom -o feature-table.tsv --to-tsv
+~~~
+{: .bash}
+
+~~~
+`feature-table.tsv`
+~~~
+{: .output}
+
+Al mismo tiempo, es necesaria una tabla de asignación taxonómica para complementar el 
+análisis. Para ello usaremos el siguiente código con QIIME2.
+
+Comenzaremos por entrenar el clasificador para nuestros datos.
+
+## Código para 16S rRNA
+
+Los archivos para el entrenamiento del clasificador se pueden encontrar en el siguiente [enlace](https://doi.org/10.5281/zenodo.3731176)
+~~~
+qiime feature-classifier fit-classifier-sklearn \
+  --i-reference-reads silva-138-99-seqs.qza \
+  --i-reference-taxonomy silva-138-99-tax.qza \
+  --o-classifier silva-138-99-nb-classifier.qza
+~~~
+{: .bash}
+
+Una vez ingresados nuestros datos para entrenar el clasificador, corremos nuestros datos 
+representativos. 
+
+~~~
+qiime feature-classifier classify-hybrid-vsearch-sklearn \
+  --i-classifier silva-138-99-nb-classifier.qza \
+  --i-reads 16s-rep-seqs.qza \
+  --o-classification 16s-taxonomy.qza
+
+qiime metadata tabulate \
+  --m-input-file 16s-taxonomy.qza \
+  --o-visualization 16s-taxonomy.qzv
+~~~
+{: .bash}
+
+
+## Código para ITS
+
+Los archivos para entrenar el clasificador se pueden encontrar en el siguiente [enlace](https://doi.org/10.15156/BIO/1264819) 
+~~~
+qiime feature-classifier fit-classifier-sklearn \
+  --i-reference-reads unite-vers8-99-seqs-10-05-2021.qza \
+  --i-reference-taxonomy unite-vers8-99-tax-10-05-2021.qza \
+  --o-classifier unite-ver8-99-classifier.qza
+  --verbose
+~~~
+{: .bash}
+
+Una vez ingresados nuestros datos para entrenar el clasificador, corremos nuestros datos 
+representativos. 
+
+~~~
+qiime feature-classifier classify-hybrid-vsearch-sklearn \
+  --i-classifier unite-ver8-99-classifier.qza \
+  --i-reads its-rep-seqs.qza \
+  --o-classification its-taxonomy.qza
+
+qiime metadata tabulate \
+  --m-input-file its-taxonomy.qza \
+  --o-visualization its-taxonomy.qzv
+~~~
+{: .bash}
+
+Para ambos 16S rRNA e ITS puede descargarse la tabla de taxonomía desde el portal de QIIME2 View.
