@@ -1,0 +1,337 @@
+## Este archivo contiene el código en R para en análisis de nuestras tablas de
+abundancias y taxonomía generadas en QIIME2.
+
+En un script de R instalamos las paqueterías necesarias, entre ellas ´phyloseq´.
+
+~~~
+> if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+> BiocManager::install("phyloseq") # Install phyloseq
+~~~
+{: .language-r}
+
+Una vez instaladas las librerías, las cargamos en el espacio de trabajo.
+
+~~~
+> library(phyloseq)
+> library(ggplot2)
+> library(Biostrings)
+> library(reshape2)
+> library(fantaxtic)
+> library(readr)
+> library(tidyverse)
+> library(plyr)
+> library(gridExtra)
+> library(grid)
+> library(xtable)
+> library(ggpubr)
+> library(kableExtra)
+> library(microbiome)
+> library(ampvis2)
+> library(metagenomeSeq)
+> library(devtools)
+> library(easyGgplot2)
+> library(tidyMicro)
+> library(magrittr)
+> library(easyGgplot2)
+> library(raster)
+> library(sf)
+> library(leaflet)
+> library(dplyr)
+> library(RColorBrewer)
+> library(microbiomeutilities)
+~~~
+{: .language-r}
+
+## Importando datasets
+
+~~~
+> taxonomy <- read.table("~/mezcal-tesis/16S/60-16-ASV_tax_assignments.txt", 
+                       header=T, row.name = 1, sep = "\t")
+> otu_mat <- read.table("~/mezcal-tesis/16S/60-16s-ASV_Abundance_Table.txt", 
+                      header=T, row.name = 1, sep = "\t")
+> samples_df <- read.table("~/mezcal-tesis/16S/metadata-16s.txt", header=T, 
+                         row.name = 1, sep = "\t")
+~~~
+{: .language-r}
+
+
+## Construyendo objeto phyloseq con datasets cargados
+
+~~~
+> ps <- phyloseq(otu_table(as.matrix(otu_mat), taxa_are_rows=FALSE), 
+               sample_data(samples_df),  tax_table(as.matrix(taxonomy)))
+> ps 
+~~~
+{: .language-r}
+
+## Filtramos datos, con Phyla incongruente y singletons
+## Computamos prevalencia para cada feature y la guardamos en un data frame
+
+~~~
+> prevdf = apply(X = otu_table(ps),
+               MARGIN = ifelse(taxa_are_rows(ps), yes = 1, no = 2),
+               FUN = function(x){sum(x > 0)})
+
+## Le agregamos la taxonomía
+~~~
+{: .language-r}
+
+~~~~
+> prevdf = data.frame(Prevalence = prevdf,
+                    TotalAbundance = taxa_sums(ps),
+                    tax_table(ps))
+~~~
+{: .language-r}
+
+## Imprimir las distintas taxas con cada una de sus prevalencias
+
+~~~
+> plyr::ddply(prevdf, "Genus", 
+            function(df1){cbind(mean(df1$Prevalence),
+                                sum(df1$Prevalence))}) -> dfprev
+
+> kable(dfprev)
+~~~
+{: .language-r}
+
+## Definimos taxa a filtrar. Especificamos aquellos que sean singletones
+
+~~~
+> filterGenus = c("g__Flaviflexus","g__Zoogloea","g__Xanthobacter","g__Xanthobacter",
+                "g__Wolbachia","f__NA","c__Cyanobacteria",
+                "f__Mitochondria","c__Chloroplast","p_Cyanobacteria","g__NA", "g__Penicillium expansum", "g__Kozakia","g__Bavariicoccus",
+                "g__Delftia","g__Aeromonas","g_Aspergillus tubingensis","g__Escherichia-Shigella")
+~~~
+{: .language-r}
+
+## Procedemos a filtrar
+
+~~~
+> (ps1 = subset_taxa(ps, !Phyllum %in% filterGenus))
+> (ps1 = subset_taxa(ps, !Class %in% filterGenus))
+> (ps1 = subset_taxa(ps, !Family %in% filterGenus))
+> (ps1 = subset_taxa(ps, !Genus %in% filterGenus))
+
+### Tambienn podemos remover taxa que no se observe más de X veces en al menos 10% de las muestras
+
+~~~
+> ps1.2 <- filter_taxa(ps1, function(x) sum(x > 2) > (0.1*length(x)), TRUE)
+> ps1.2
+> ps2 = prune_samples(sample_sums(ps1.2) > 1000, ps1.2)
+> ps2
+> prevdf1 = subset(prevdf, Genus %in% get_taxa_unique(ps2, "Genus"))
+~~~
+{: .language-r}
+
+## Imprimir figura de prevalencia x abundancia 
+
+~~~
+> ggplot(prevdf1, aes(TotalAbundance, Prevalence / nsamples(ps2),color=Genus)) + 
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) +  
+  geom_point(size = 4, alpha = 0.7) + scale_x_log10() +  xlab("Total Abundance") + 
+  ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Genus) + theme(legend.position="none")
+
+> ggsave("abundanceXprevalence.png", height=10, width=10,dpi = 300)
+> dev.off()
+~~~
+{: .language-r}
+
+
+## Ahora preparamos los datos filtrados para crear una tabla de abundancias y 
+prevalencias en el top de géneros más abundantes a lo alrgo de la fermentación.
+
+~~~
+> lev<-levels(ps2$`Estadio de fermentacion`)
+> L.pairs<-combn(seq_along(lev),2, simplify = FALSE, FUN=NULL)
+> ps.com <- ps2
+#if you have dada2/deblur output and sequences as taxa names, then you can change them as follows
+#taxa_names(ps_its_1.com) <- paste0("ASV_", rownames(tax_table(ps_its_1.com)))
+>taxic <- as.data.frame(ps.com@tax_table) # este código ayudará a dar una amplia cantidad de colores disponibles
+> colourCount = length(unique(taxic$Genus))  #define number of variable colors based on number of Family (change the level accordingly to phylum/class/order)
+> getPalette = colorRampPalette(brewer.pal(12, "Paired"))  # change the palette as well as the number of colors will change according to palette.
+> taxic$X <- rownames(taxic) # Add the OTU ids from OTU table into the taxa table at the end.
+> colnames(taxic) # You can see that we now have extra taxonomy levels.
+> taxmat <- as.matrix(taxic) # convert it into a matrix.
+>new.tax <- tax_table(taxmat) # convert into phyloseq compatible file.
+> tax_table(ps.com) <- new.tax # incroporate into phyloseq Object
+# now edit the unclassified taxa
+tax_table(ps.com)[tax_table(ps.com)[, "Family"] == "NA", "Family"] <- "Unclassified family"
+# it would be nice to have the Taxonomic names in italics.
+# for that we set this
+> guide_italics <- guides(fill = guide_legend(label.theme = element_text(
+  size = 15,
+  face = "italic", colour = "Black", angle = 0)))
+## Now we need to plot at family level, we can do it as follows:
+# first remove the phy_tree
+> ps_its_1.com@phy_tree <- NULL
+# Second merge at family level
+> ps.com.fam <- microbiome::aggregate_taxa(ps.com, "Genus")
+> plot.composition.COuntAbun <- plot_composition(ps.com.fam) + theme(legend.position = "bottom") +
+  scale_fill_brewer("Genus", palette = "Paired") + theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle("Relative abundance") + guide_italics + theme(legend.title = element_text(size = 18))
+> plot.composition.COuntAbun
+> ps_df<-microbiomeutilities::phy_to_ldf(ps.com.fam,
+                                           transform.counts = "compositional")
+> p.box<-ggstripchart(ps_df, "Estado", "Abundance",
+                    shape="Especie_de_agave", size=4,
+                    facet.by = "Genus", color = "Estado",
+                    palette = "uscscbg")
+> p.box +rremove("x.text")
+> ggsave("especieXestado.png", height=14, width=15,dpi = 300)
+~~~
+{: .language-r}
+
+## Cargando variables para ampvis y crear heat maps 
+~~~
+> otu_mat_16s_amp<- read.table("~/Documents/unam/Anio4/Tesis/Estadísticos/mezcal-tesis/16S/OTU-table-ampvis2.txt", header=T, row.name = NULL, sep = "\t", check.names = FALSE)
+> samples_df_16s_amp<- read.table("~/Documents/unam/Anio4/Tesis/Estadísticos/mezcal-tesis/16S/metadata-16s.txt", header=T, row.name = NULL, sep = "\t", check.names = FALSE)
+## Crear objeto ampvis
+> d2work_16s <- amp_load(otu_mat_16s_amp, samples_df_16s_amp)
+> amp_heatmap(data=d2work_16s, group_by ="Especie_de_agave",
+            facet_by = "Estado", tax_show=20, plot_values=FALSE,
+            plot_colorscale="log10",plot_na = T,
+            tax_aggregate = "Genus")
+> ggsave("heatmapespeciexestado-16s.png", height=10, width=10,dpi = 300)
+~~~
+{: .language-r}
+
+## plotting diversities
+## ALPHA-DIVERSITY             
+~~~                  
+> plot_richness(ps1, x= "Especie_de_agave", measures = c("Chao1","Shannon","Simpson")) + 
+      geom_boxplot(aes(fill=Estado)) + geom_point(size = 1) #aes(fill = Estado), alpha=.7) + 
+
+> ggsave("alphadiversid-16s-2.png", height=7, width=7,dpi = 300)
+~~~
+{: .language-r}
+                         
+
+## Beta div
+## NMDS
+~~~
+> ps.prop <- transform_sample_counts(ps1, function(otu) otu/sum(otu))
+> ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+> evals<-ord.nmds.bray$values$Eigenvalues
+#plot de estado y especie de agave
+> p<-plot_ordination(ps.prop, ord.nmds.bray, color="Especie_de_agave", 
+                title="Bray NMDS", shape = "Estado") +geom_point(size=3) +stat_ellipse()
+> p +theme_bw() +theme(text = element_text(size=16))+ theme(panel.grid.major=element_blank(), panel.grid.minor = element_blank())+geom_point(size=4)
+> ggsave("betadiv_estadioXespecie_agav_16-10-2.png", height=7, width=9,dpi = 300)
+#plot de especie de agave y estadio
+> p1<-plot_ordination(ps.prop, ord.nmds.bray, color="Estadio_de_fermentacion", 
+                   title="taxones", shape = "Estado") +geom_point(size=3) +stat_ellipse()
+> p1 +theme_bw() +theme(text = element_text(size=16))+ theme(panel.grid.major=element_blank(), panel.grid.minor = element_blank())+geom_point(size=4)
+> ggsave("16Sbetadiv_estadioXespecie_agav.png", height=7, width=9,dpi = 300)
+
+> ggsave("betadiv_estadoXespecie_agav.png", height=7, width=9,dpi = 300)
+#*** No convergence -- monoMDS stopping criteria:
+#20: stress ratio > sratmax
+~~~
+{: .language-r}
+
+
+## BAR PLOT
+## Para hacer barplot más dinámico
+#Para barplot en secciones creamos subsets de acuerdo los requerimientos.
+
+~~~
+> (ps.com.fam.inicial=subset_samples(ps2, Estadio_de_fermentacion =="Inicial"))
+> (ps.com.fam.intermedio=subset_samples(ps2, Estadio_de_fermentacion =="Intermedio"))
+> (ps.com.fam.final=subset_samples(ps2, Estadio_de_fermentacion =="Final"))
+> (ps.com.fam.sonora=subset_samples(ps2, Estado =="Sonora"))
+> (ps.com.fam.jalisco=subset_samples(ps2, Estado =="Jalisco"))
+> (ps.com.fam.oaxaca=subset_samples(ps2, Estado =="Oaxaca"))
+> (ps.com.fam.gto=subset_samples(ps2, Estado =="Guanajuato"))
+> (ps.com.fam.puebla=subset_samples(ps2, Estado =="Puebla"))
+> (ps.com.fam.Aan=subset_samples(ps2, Estado =="A. angustifolia var X."))
+> (ps.com.fam.Apo=subset_samples(ps2, Estado =="A. potatorum"))
+~~~
+{: .language-r}
+
+
+## Oaxaca
+
+~~~
+> top16 <- get_top_taxa(physeq_obj = ps.com.fam.oaxaca, n = 15, relative = T, 
+                      discard_other = T , other_label = "Other")
+> top16 <- name_taxa(top16, label ="Other", 
+                   species = F, other_label = "Other")
+> ptop16 <- fantaxtic_bar(top16, color_by = "Genus", label_by = "Genus",
+              facet_by = NULL, grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c(""AanOax04","AanOax03","AanOax05","ApoOax03","AanOax01",
+"AamOax03","AanOax12","AanOax03","AanOax06","AanOax03",
+"AanOax06","ApoOax06","ApoOax05","ApoOax00","AanOax03","ApoOax04","AanOax03",
+"ApoOax04","AanOax04",
+"AanOax03","AkaOax07","ApoOax07","AanOax12",
+"AanOax01","AkaOax07","AanOax01","AanOax03","AanOax02",
+"AanOax08","AanOax04","AamOax00","AkaOax01","AanOax17",
+"AanOax05","AanOax03""))
+> ggsave("barplot-oaxaca.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+
+## Jalisco
+
+~~~
+> top16.jal <- get_top_taxa(physeq_obj = ps.com.fam.jalisco, n = 15, relative = T, 
+                      discard_other = T , other_label = "Other")
+> top16.jal <- name_taxa(top16.jal, label ="Other", 
+                   species = F, other_label = "Other")
+> ptop16.jal <- fantaxtic_bar(top16.2, color_by = "Genus", label_by = "Genus",
+                        facet_by = NULL, grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AsaxanJal03","AsaxanJal03","ArhJal00","ArhJal00",
+"AsaxanJal60",
+"AsaxanJal60"))
+> ptop16.jal
+> ggsave("barplot-jalisco.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+
+## Sonora
+~~~
+> top16.son <- get_top_taxa(physeq_obj = ps.com.fam.sonora, n = 15, relative = T, 
+                        discard_other = T , other_label = "Other")
+> top16.son <- name_taxa(top16.son, label ="Other", 
+                     species = F, other_label = "Other")
+> ptop16.son <- fantaxtic_bar(top16.son, color_by = "Genus", label_by = "Genus",
+                          facet_by = NULL, grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AanSon12","AanSon15","AanSon06","AanSon08","AanSon06",
+"AanSon08","AanSon01","AanSon07","AanSon12"))
+> ptop16.son
+> ggsave("barplot-sonora.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+## Puebla 
+~~~
+> top16.pue <- get_top_taxa(physeq_obj = ps.com.fam.puebla, n = 15, relative = T, 
+                        discard_other = T , other_label = "Other")
+> top16.pue <- name_taxa(top16.pue, label ="Other", 
+                     species = F, other_label = "Other")
+> ptop16.pue <- fantaxtic_bar(top16.pue, color_by = "Genus", label_by = "Genus",
+                          facet_by = NULL, grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AanPue02","AanPue03","AanPue01"))
+> ptop16.pue
+> ggsave("barplot-puebla.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+## Guanajuato
+~~~
+> top16.gua <- get_top_taxa(physeq_obj = ps.com.fam.guanajuato, n = 15, relative = T, 
+                        discard_other = T , other_label = "Other")
+> top16.gua <- name_taxa(top16.gua, label ="Other", 
+                     species = F, other_label = "Other")
+> ptop16.gua <- fantaxtic_bar(top16.gua, color_by = "Genus", label_by = "Genus",
+                          facet_by = NULL, grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AanGua06","AanGua05"))
+> ptop16.gua
+> ggsave("barplot-guanajuato.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
