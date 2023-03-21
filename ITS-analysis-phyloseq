@@ -1,0 +1,293 @@
+## Este archivo contiene código en R para visualizar datos de metabarcoding 
+(tablas de abundancia y taxonomía) generados en QIIME2. 
+
+library(phyloseq)
+library(ggplot2)
+library(Biostrings)
+library(fantaxtic)
+library(readr)
+library(tidyverse)
+library(plyr)
+library(gridExtra)
+library(grid)
+library(xtable)
+library(ggpubr)
+library(kableExtra)
+library(microbiome)
+library(metagenomeSeq)
+library(devtools)
+library(easyGgplot2)
+library(raster)
+library(sf)
+library(leaflet)
+library(dplyr)
+library(RColorBrewer)
+library(microbiomeutilities)
+library(ampvis2)
+
+ 
+## Cargar archivos para crear objeto phyloseq
+~~~
+taxonomy_its<- read.table("~/Documents/unam/Anio4/Tesis/Estadísticos/mezcal-tesis/its2.2/ASVs_f2_tax.tsv", header = T, row.name =1, sep = "\t")
+otu_mat_its<- read.table("~/Documents/unam/Anio4/Tesis/Estadísticos/mezcal-tesis/its2.2/ASVs_f2_counts.tsv", header=T, row.name = 1, sep = "\t")
+samples_df_its<- read.table("~/Documents/unam/Anio4/Tesis/Estadísticos/mezcal-tesis/ITS2/metadata-its.txt", header=T, row.name = 1, sep = "\t")
+~~~
+{: .language-r}
+
+## Crear objeto phyloseq
+~~~
+ps_its <- phyloseq(otu_table(as.matrix(otu_mat_its), taxa_are_rows=FALSE), sample_data(samples_df_its),  tax_table(as.matrix(taxonomy_its)))
+ps_its
+~~~
+{: .language-r}
+
+## Filtramos datos: incongruente y singletons
+## Computamos prevalencia para cada feature y la guardamos en un data frame
+~~~
+> prevdf_its = apply(X = otu_table(ps_its), MARGIN = ifelse(taxa_are_rows(ps_its), 
+                                                          yes = 1, no = 2), 
+                   FUN = function(x){sum(x > 0)})
+## Le agregamos la taxonomía
+> prevdf_its = data.frame(Prevalence = prevdf_its,
+                    TotalAbundance = taxa_sums(ps_its),
+                    tax_table(ps_its))
+## Imprimir las distintas taxas con cada una de sus prevalencias
+> plyr::ddply(prevdf_its, "Species", 
+            function(df1){cbind(mean(df1$Prevalence),
+                                sum(df1$Prevalence))}) -> dfprev_its
+> kable(prevdf_its)
+~~~
+{: .language-r}
+
+## Definimos taxa a filtrar. Especificamos aquellos que sean singletones
+~~~
+> filterFamily_its = c("f__unidentified", "f__Fabaceae", "f__Convolvulaceae",
+                     "f__Poaceae", "f__Cannabaceae", "f__Nyctaginaceae", 
+                     "f__Asteraceae","f__Sapotaceae","f__Urticaceae",
+                     "f__Rosaceae","f__Trebouxiaceae", "f__Amaranthaceae",
+                     "f__Burseraceae", "f__Solanaceae", "f__Asparagaceae",
+                     "f__Moraceae", "f__Myrtaceae","f__Oleaceae",
+                     "f__Vorticellidae", "f__Operculariidae", 
+                     "f__Uronematidae","f__Tetrahymenidae", "f__Vorticellidae",
+                     NA)
+> filterGenus_its =c("g__Agave", "g__Allantonectria", "g__Albifimbria",
+                   "g__Bisifusarium","g__Bursera","g__Byssochlamys","g__Celtis", "g__Clonostachys", 
+                   "g__Chaetomium","g__Diutina","g__Dipodascus","g__Desmodium", "g__Dysphania","g__Fraxinus",
+                   "g__Gibberella","g__Gilbertella","g__Helicoma",
+                   "g__Kodamaea","g__Kwoniella","g__Lapidomyces","g__Lodderomyces","g__Lasiodiplodia",
+                   "g__Nigrospora","g__Naganishia","g__Nectriopsis","g__Nectriopsis", 
+                   "g__Millerozyma","g__Minimelanolocus","g__Ipomoea","g__Prosopis","g__Psidium",
+                   "g__Pyrenochaeta",
+                   "g__Pithoascus", "g__Phaeosphaeria", "g__Peyronellaea", "g__Periconia",
+                   "g__Peniophora","g__Panus", "g__Sideroxylon", "g__Suhomyces", "g__Scopulariopsis", 
+                   "g__Schwanniomyces","g__Saitozyma","g__Vigna", "g__Yarrowia", "g__Wickerhamiella", 
+                   "g__Westerdykella", "g__Volutella", "g__Vorticella", "g__unidentified", 
+                   "g__Tremateia", "g__Trametes", "g__Thermomyces", "g__Talaromyces",
+                   "g__Carchesium","g__Cladosporium",
+                   "g__Coniochaeta","g__Cystofilobasidium","g__Erysiphe",
+                   "g__Fusarium","g__Hannaella","g__Hyphopichia","g__Ogataea",
+                   "g__Papiliotrema","g__Prosopis","g__Rhizopus","g__Sordaria",
+                   "g__Rhodosporidiobolus","g__Rhodotorula","g__Symmetrospora",
+                   "g__Penicillium","g__Wickerhamomyces", "g__Zygoascus",
+                   "g_Thermoascus","g__Vishniacozyma","g__Nakaseomyces","g__Meyerozyma", 
+                   "g__Veronaea", "g__Wallemia", "g__Waitea",
+                   "g__Ustilago","g__Trigonopsis", 
+                   "g__Tremateia","g__Trametes","g__Strelitziana",
+                   "g__Sterigmatomyces","g__Schizosaccharomyces", "g__Saturnispora",
+                   "g__Sarocladium", "g__Saitozyma","g__Rhodosporidiobolus","g__Remotididymella","g__Pyrenochaeta",
+                   "g__Pseudorobillarda","g__Plectosphaerella","g__Phialophora","g__Phaeosphaeria",
+                   "g__Phaeolus","g__Phaeococcomyces","g__Periconia","g__Paraphaeosphaeria","g__Papiliotrema","g__Oidiodendron",
+                   "g__Oliveonia","g__Neocucurbitaria","g__Nectriopsis","g__Myxozyma","g__Myrmaecium","g__Moniliella",
+                   "g__Microcyclospora","g__Martiniozyma","g__Malassezia","g__Lodderomyces","g__Lepidosphaeria","g__Lapidomyces","",
+                   "g__Kwoniella","g__Kondoa","g__Knufia","g__Hypoxylon","g__Hyphopichia","g__Hormonema","g__Herpotrichia",
+                   "g__Gloniopsis","g__Gilbertella","g__Geotrichum","g__Filobasidium","g__Endosporium",
+                   "g__Diutina","g__Dipodascus","g__Deniquelata","g__Cytospora","g__Cystobasidium",
+                   "g__Cylindrobasidium","g__Curvularia","g__Curvibasidium","g__Coremiopassalora","g__Constantinomyces",
+                   "g__Conlarium","g__Coniothyrium","g__Coniochaeta","g__Cladophialophora","",
+                   "g__Catenulostroma","g__Capnodium","g__Bisifusarium","g__Aplosporella","g__Yamadazyma","g__Didymella",
+                   "g__Epicoccum","g__Cyberlindnera","g__Preussia", "g__Stagonosporopsis",
+                   NA)
+> (ps_its_1 = subset_taxa(ps_its, !Family %in% filterFamily_its))
+> (ps_its_1 = subset_taxa(ps_its, !Genus %in% filterGenus_its))
+~~~
+{: .language-r}
+
+## Seleccionamos las taxa de interés &&&&& Imprimir figura de prevalencia x abundancia
+~~~
+> prevdf1_its = subset(prevdf_its, Genus %in% get_taxa_unique(ps_its_1, "Genus"))
+> kable(prevdf1_its)
+> ggplot(prevdf1_its, aes(TotalAbundance, Prevalence / nsamples(ps_its_1),color=Genus)) + 
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) +  
+  geom_point(size = 5, alpha = 0.7) + scale_x_log10() +  xlab("Total Abundance") + 
+  ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Genus) + theme(legend.position="none")
+> ggsave("abundanceXprevalence_its.png", height=10, width=10,dpi = 300)
+~~~
+{: .language-r}
+
+#Heatmap
+~~~
+> otu_mat_its_amp<- read.table("~/Documents/unam/Anio4/Tesis/Estadísticos/mezcal-tesis/its2.2/ASVs_f2_counts_ampvis.txt", header=T, row.name = NULL, sep = "\t", check.names = FALSE)
+> samples_df_its_amp<- read.table("~/Documents/unam/Anio4/Tesis/Estadísticos/mezcal-tesis/ITS2/metadata-its.txt", header=T, row.name = NULL, sep = "\t", check.names = FALSE)
+## Crear objeto amp
+> d2work_its <- amp_load(otu_mat_its_amp, samples_df_its_amp)
+#Plotting
+> amp_heatmap(data=d2work_its, group_by ="Especie_de_agave",
+            facet_by = "Estado", tax_show=20, plot_values=FALSE,
+            plot_colorscale="log10",plot_na = T,
+            tax_aggregate = "Genus")
+> ggsave("heatmapespeciexestado-its.png", height=10, width=10,dpi = 300)
+~~~
+{: .language-r}
+
+## Arreglamos los datos filtrados para prearar una gráfica de abundancia y prevalencia 
+de géneros más abundantes a lo largo de la fermentación.
+~~~
+> ps_its_1.com <- ps_its_1
+# if you have dada2/deblur output and sequences as taxa names, then you can change them as follows
+#taxa_names(ps_its_1.com) <- paste0("ASV_", rownames(tax_table(ps_its_1.com)))
+# We need to set Palette
+> taxic <- as.data.frame(ps_its_1.com@tax_table) # this will help in setting large color options
+> colourCount = length(unique(taxic$Genus))  #define number of variable colors based on number of Family (change the level accordingly to phylum/class/order)
+> getPalette = colorRampPalette(brewer.pal(12, "Paired"))  # change the palette as well as the number of colors will change according to palette.
+> taxic$X <- rownames(taxic) # Add the OTU ids from OTU table into the taxa table at the end.
+> colnames(taxic) # You can see that we now have extra taxonomy levels.
+> taxmat <- as.matrix(taxic) # convert it into a matrix.
+> new.tax <- tax_table(taxmat) # convert into phyloseq compatible file.
+> tax_table(ps_its_1.com) <- new.tax # incroporate into phyloseq Object
+# now edit the unclassified taxa
+> tax_table(ps_its_1.com)[tax_table(ps_its_1.com)[, "Family"] == "NA", "Family"] <- "Unclassified family"
+# it would be nice to have the Taxonomic names in italics.
+# for that we set this
+> guide_italics <- guides(fill = guide_legend(label.theme = element_text(
+  size = 15,
+  face = "italic", colour = "Black", angle = 0)))
+## Now we need to plot at family level, we can do it as follows:
+# first remove the phy_tree
+> ps_its_1.com@phy_tree <- NULL
+# Second merge at family level
+> ps_its_1.com.fam <- microbiome::aggregate_taxa(ps_its_1.com, "Genus")
+> plot.composition.COuntAbun <- plot_composition(ps_its_1.com.fam) + theme(legend.position = "bottom") +
+  scale_fill_brewer("Genus", palette = "Paired") + theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle("Relative abundance") + guide_italics + theme(legend.title = element_text(size = 18))
+> plot.composition.COuntAbun
+> ps_its_df<-microbiomeutilities::phy_to_ldf(ps_its_1.com.fam,
+                                           transform.counts = "compositional")
+> p.box<-ggstripchart(ps_its_df, "Estado", "Abundance",
+                    shape="Especie_de_agave", size=5,
+                    facet.by = "Genus", color = "Estado",
+                    palette = "uscscbg")
+> p.box+rremove("x.text")
+> ggsave("especieXestado_its.png", height=14, width=15,dpi = 300)
+~~~
+{: .language-r}
+
+## ALPHA-DIVERSITY         
+~~~
+> plot_richness(ps_its_1, x= "Especie_de_agave", measures = c("Chao1","Shannon","Simpson")) + 
+  geom_boxplot(aes(fill=Estado)) + geom_point(size = 1) #aes(fill = Estado), alpha=.7) + 
+> ggsave("alphadiversid-ITS-16-10-2.png", height=7, width=7,dpi = 300)
+~~~
+{: .language-r}
+
+## Beta div
+## NMDS
+~~~
+> ps.prop_its <- transform_sample_counts(ps_its_1, function(otu) otu/sum(otu))
+> ord.nmds.bray_its <- ordinate(ps.prop_its, method="NMDS", distance="bray")
+> evals<-ord.nmds.bray_its$values$Eigenvalues
+> p<-plot_ordination(ps.prop_its, ord.nmds.bray_its, color="Especie_de_agave", 
+                title="Bray NMDS", shape = "Estado") + 
+  geom_point(size=3) +stat_ellipse()
+> p +theme_bw() +theme(text = element_text(size=16))+ theme(panel.grid.major=element_blank(), panel.grid.minor = element_blank())+geom_point(size=4)
+> ggsave("betadiv_estadoXespecie_agav_its-16-10.png", height=7, width=9,dpi = 300)
+> p<-plot_ordination(ps.prop, ord.nmds.bray, color="Especie_de_agave", 
+                   title="taxones", shape = "Estado") +geom_point(size=3) +stat_ellipse()
+> p +theme_bw() +theme(text = element_text(size=16))+ theme(panel.grid.major=element_blank(), panel.grid.minor = element_blank())+geom_point(size=4)
+> ggsave("betadiv_estadioXespecie_agav_16-10.png", height=7, width=9,dpi = 300)
+~~~
+{: .language-r}
+
+## BAR PLOT
+## Para hacer barplot más dinámico
+~~~
+> (ps2.sonora=subset_samples(ps_its_1, Estado =="Sonora"))
+> (ps2.Aan=subset_samples(ps_its_1, Especie_de_agave =="A. angustifolia var X."))
+> (ps2.Apo=subset_samples(ps_its_1, Especie_de_agave =="A. potatorum"))
+> (ps2.jalisco=subset_samples(ps_its_1, Estado =="Jalisco"))
+> (ps2.oaxaca=subset_samples(ps_its_1, Estado =="Oaxaca"))
+> (ps2.puebla=subset_samples(ps_its_1, Estado =="Puebla"))
+> (ps2.guanajuato=subset_samples(ps_its_1, Estado =="Guanajuato"))
+> (ps2.est1=subset_samples(ps_its_1, Estadio_de_fermentacion =="Inicial"))
+> (ps2.est2=subset_samples(ps_its_1, Estadio_de_fermentacion =="Intermedio"))
+> (ps2.est3=subset_samples(ps_its_1, Estadio_de_fermentacion =="Final"))
+~~~
+{: .language-r}
+
+## Jalisco 
+
+~~~
+> top15_jal <- get_top_taxa(physeq_obj = ps2.jalisco, n = 15, relative = T, discard_other = T, other_label = "Other")
+> top15_jal <- name_taxa(top15_jal, label = "Other", species = F, other_label = "Other")  
+> ptop15_jal<-fantaxtic_bar(top15_jal, color_by = "Family", label_by = "Genus", order_alg = "other.abnd", 
+                          grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c(""ArhJal00","ArhJal00","AsaxanJal03","AsaxanJal60","AsaxanJal60","AsaxanJal03"))
+> ptop15_its                  
+> ggsave("barplot-jalisco-its.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+
+## Oaxaca
+~~~
+> top15_its_2 <- get_top_taxa(physeq_obj = ps2.oaxaca, n = 15, relative = T, discard_other = T, other_label = "Other")
+> top15_its_oaxaca <- name_taxa(top15_its_oaxaca, label = "Other", species = F, other_label = "Other")  
+> ptop15_its_oaxaca <-fantaxtic_bar(top15_its_oaxaca, color_by = "Family", label_by = "Genus", order_alg = "other.abnd", 
+                          grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AanOax05","AanOax04","AanOax03","AanOax03","AanOax03","AanOax08","AkaOax07","AkaOax07","AkaOax01","ApoOax03",
+"ApoOax05","ApoOax06","AanOax17","AanOax06","AanOax01",
+"AanOax04","AanOax03","ApoOax07","ApoOax04","ApoOax00",
+"AamOax03","AanOax03","AanOax04","AamOax00","AanOax06",
+"AanOax12","AanOax01","AanOax12","AanOax05","AanOax03",
+"AanOax01","AanOax02","AanOax03","AanOax04"))
+> ptop15_its_2
+> ggsave("barplot-oaxaca-its.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+## Sonora
+~~~
+> top15_its_3 <- get_top_taxa(physeq_obj = ps2.sonora, n = 15, relative = T, discard_other = T, other_label = "Other")
+> top15_its_son <- name_taxa(top15_its_son, label = "Other", species = F, other_label = "Other")  
+> ptop15_its_son<-fantaxtic_bar(top15_its_son, color_by = "Family", label_by = "Genus", order_alg = "other.abnd", 
+                          grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AanSon15","AanSon01","AanSon08","AanSon12","AanSon07","AanSon12","AanSon08","AanSon06","AanSon06"))
+> ptop15_its_3
+> ggsave("barplot-sonora-its.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+## Puebla
+~~~
+> top15_its_3 <- get_top_taxa(physeq_obj = ps2.puebla, n = 15, relative = T, discard_other = T, other_label = "Other")
+> top15_its_pue <- name_taxa(top15_its_pue, label = "Other", species = F, other_label = "Other")  
+> ptop15_its_pue<-fantaxtic_bar(top15_its_pue, color_by = "Family", label_by = "Genus", order_alg = "other.abnd", 
+                          grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AanPue02", "AanPue03"))
+> ptop15_its_pue
+> ggsave("barplot-pue-its.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
+
+## Guanajuato
+~~~
+> top15_its_3 <- get_top_taxa(physeq_obj = ps2.guanajuato, n = 15, relative = T, discard_other = T, other_label = "Other")
+> top15_its_gua <- name_taxa(top15_its_gua, label = "Other", species = F, other_label = "Other")  
+> ptop15_its_gua<-fantaxtic_bar(top15_its_gua, color_by = "Family", label_by = "Genus", order_alg = "other.abnd", 
+                          grid_by = NULL, other_color = "Grey") + 
+  scale_x_discrete(labels= c("AanGua06","AanGua05"))
+> ptop15_its_gua
+> ggsave("barplot-gua-its.png", height=9, width=9,dpi = 300, bg="white")
+~~~
+{: .language-r}
