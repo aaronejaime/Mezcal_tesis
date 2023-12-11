@@ -1,0 +1,12 @@
+qiime tools export table.qza --output-dir ./
+$ biom convert -i feature-table.biom -o feature-table.tsv --to-tsv
+$ biom head -i feature-table.tsv
+# Constructed from biom file
+#OTU ID	L1S105	L1S140	L1S208	L1S257	L1S281
+4b5eeb300368260019c1fbc7a3c718fc	2222.0	0.0	0.0	0.0	0.0
+fe30ff0f71a38a39cf1717ec2be3a2fc	5.0	0.0	0.0	0.0	0.0
+d29fe3c70564fc0f69f2c03e0d1e5561	0.0	0.0	0.0	0.0	0.0
+868528ca947bc57b69ffdf83e6b73bae	0.0	2276.0	2156.0	1205.0	1772.0
+154709e160e8cada6bfb21115acc80f5	812.0	1176.0	713.0	407.0	242.0 
+
+#Ready to import to phyloseq for further analysis.

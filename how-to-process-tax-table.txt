@@ -1,0 +1,26 @@
+#This is a sample Taxonomy data
+
+Feature ID	Taxon	Confidence
+ae3fd1a9083ed263b3d55bf6c6572a66	k__Bacteria; p__Bacteroidetes; c__Bacteroidia; o__Bacteroidales; f__Bacteroidaceae; g__Bacteroides; s__	0.967327777
+cf1b2275183b5e241f602660c32084a0	k__Bacteria; p__Firmicutes; c__Bacilli; o__Lactobacillales; f__Lactobacillaceae; g__Lactobacillus; s__ruminis	0.940705832
+e3338a6d212a227ebed5fef419540db4	k__Bacteria; p__Firmicutes; c__Erysipelotrichi; o__Erysipelotrichales; f__Erysipelotrichaceae; g__[Eubacterium]; s__biforme	0.999998186
+
+To process the table in the terminal you can use the following command:
+
+echo '#Kingdom#Phylum#Class#Order#Family#Genus#Species' | tr '#' '\t' > taxonomy-table.tsv
+cut -f 1-2 path-to-your-taxonomy-file.tsv | tr ';' '\t' | tail -n +2 >> taxonomy-table.tsv
+
+
+OR 
+
+If you prefer to do this in excel/LibreOffice you can do the following:
+
+1) Open file (here, LibreOfficeCalc)
+Separator Options: Separated by: Tab (check) -> OK
+2) Now you can just remove whole Confidence column
+3) Select whole Taxon column
+4) Go to: Data -> Text to Columns -> Separated by: Semicolon -> OK
+5) Save the file 
+
+You can check the next linkt to get more information about LibreOffice uses:
+https://help.libreoffice.org/Calc/Text_to_Columns
